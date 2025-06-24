@@ -1,13 +1,17 @@
 'use client'
 import React, { useState } from "react";
-import { colorFamilies } from "@/data/types";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { isValidHex, findBestNumber } from "@/data/utils";
 
-export default function Component() {
+interface PalletteProps {
+  colors: Record<string, Record<string, string>>
+  setColors: React.Dispatch<React.SetStateAction<Record<string, Record<string, string>>>>
+}
+
+export default function Pallette({ colors, setColors }: PalletteProps) {
   const [copiedColor, setCopiedColor] = useState<string | null>(null)
-  const [colors, setColors] = useState(colorFamilies)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; color: any } | null>(null)
   const [newFamilyInput, setNewFamilyInput] = useState<{ index: number; name: string } | null>(null)
+  const [newColorInput, setNewColorInput] = useState<{ familyName: string; hex: string } | null>(null)
 
   const handleColorClick = (colorName: string) => {
     navigator.clipboard.writeText(colorName)
@@ -34,14 +38,15 @@ export default function Component() {
     setContextMenu(null)
   }
 
-  const handleRemove = (familyName: string, colorName: string) => {
-    setColors(prevColors => 
-      prevColors.map(family => 
-        family.name === familyName 
-          ? { ...family, colors: family.colors.filter(color => color.name !== colorName) }
-          : family
-      )
-    )
+  const handleRemove = (familyName: string, colorKey: string) => {
+    setColors(prevColors => {
+      const newColors = { ...prevColors }
+      if (newColors[familyName]) {
+        const { [colorKey]: removed, ...rest } = newColors[familyName]
+        newColors[familyName] = rest
+      }
+      return newColors
+    })
     setContextMenu(null)
   }
 
@@ -51,15 +56,11 @@ export default function Component() {
 
   const handleConfirmNewFamily = () => {
     if (newFamilyInput && newFamilyInput.name.trim()) {
-      const newFamily = {
-        name: newFamilyInput.name.trim(),
-        colors: []
-      }
-      setColors(prevColors => {
-        const newColors = [...prevColors]
-        newColors.splice(newFamilyInput.index, 0, newFamily)
-        return newColors
-      })
+      const familyName = newFamilyInput.name.trim().toLowerCase()
+      setColors(prevColors => ({
+        ...prevColors,
+        [familyName]: {}
+      }))
     }
     setNewFamilyInput(null)
   }
@@ -77,20 +78,76 @@ export default function Component() {
   }
 
   const handleRemoveFamily = (familyName: string) => {
-    setColors(prevColors => prevColors.filter(family => family.name !== familyName))
+    setColors(prevColors => {
+      const { [familyName]: removed, ...rest } = prevColors
+      return rest
+    })
+  }
+
+  const handleAddColor = (familyName: string) => {
+    setNewColorInput({ familyName, hex: '' })
+  }
+
+
+  const handleConfirmNewColor = () => {
+    if (newColorInput && newColorInput.hex.trim()) {
+      const hexValue = newColorInput.hex.trim()
+      
+      if (!isValidHex(hexValue)) {
+        alert('Please enter a valid hex color code (e.g., #ffffff or ffffff)')
+        return
+      }
+      
+      const hex = hexValue.startsWith('#') ? hexValue : `#${hexValue}`
+      const familyName = newColorInput.familyName.toLowerCase()
+      const familyColors = colors[familyName] || {}
+      
+      // Convert family colors to format expected by findBestNumber
+      const existingColors = Object.entries(familyColors).map(([key, hex]) => ({
+        name: `${familyName}-${key}`,
+        hex
+      }))
+      
+      const number = findBestNumber(existingColors, hex)
+      
+      if (familyColors[number.toString()]) {
+        alert(`Color ${familyName}-${number} already exists in this family`)
+        return
+      }
+      
+      setColors(prevColors => ({
+        ...prevColors,
+        [familyName]: {
+          ...prevColors[familyName],
+          [number.toString()]: hex
+        }
+      }))
+    }
+    setNewColorInput(null)
+  }
+
+  const handleCancelNewColor = () => {
+    setNewColorInput(null)
+  }
+
+  const handleColorKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleConfirmNewColor()
+    } else if (e.key === 'Escape') {
+      handleCancelNewColor()
+    }
   }
 
   return (
     <div className="p-8 bg-gray-50 min-h-screen">
       <div className="max-w-7xl mx-auto">
-        <h1 className="text-3xl font-bold text-gray-900 mb-8 text-center">Tailwind CSS Color Palette</h1>
         <div className="space-y-6">
-          {colors.map((family, index) => (
-            <React.Fragment key={family.name}>
+          {Object.entries(colors).map(([familyName, familyColors], index) => (
+            <React.Fragment key={familyName}>
               {/* Add family button before the first family */}
               {index === 0 && (
                 <div className="relative group">
-                  <div className="h-4 w-full flex items-center justify-center">
+                  <div className="h-4 w-full flex items-center justify-start">
                     <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200">
                       {newFamilyInput?.index === 0 ? (
                         <div className="bg-white border border-gray-300 rounded-lg px-3 py-2 shadow-sm">
@@ -102,13 +159,14 @@ export default function Component() {
                             onBlur={handleCancelNewFamily}
                             autoFocus
                             placeholder="Family name..."
-                            className="text-sm border-none outline-none bg-transparent w-32"
+                            className="text-sm border-none outline-none bg-transparent w-32 text-gray-700 placeholder-gray-600"
                           />
                         </div>
                       ) : (
                         <button
                           onClick={() => handleAddFamily(0)}
                           className="bg-blue-500 hover:bg-blue-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm transition-colors"
+                          title="Add a colour family"
                         >
                           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -122,9 +180,18 @@ export default function Component() {
 
               <div className="space-y-3">
                 <div className="group flex items-center gap-2">
-                  <h2 className="text-lg font-semibold text-gray-700 capitalize">{family.name}</h2>
+                  <h2 className="text-lg font-semibold text-gray-700 capitalize">{familyName}</h2>
                   <button
-                    onClick={() => handleRemoveFamily(family.name)}
+                    onClick={() => handleAddColor(familyName)}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 text-green-500 hover:text-green-700 p-1"
+                    title="Add color"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => handleRemoveFamily(familyName)}
                     className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 text-red-500 hover:text-red-700 p-1"
                     title="Remove family"
                   >
@@ -133,44 +200,74 @@ export default function Component() {
                     </svg>
                   </button>
                 </div>
-                <div className="grid grid-cols-11 gap-2">
-                  {family.colors.length === 0 ? (
-                    <div className="col-span-11 text-center text-gray-400 py-8 border-2 border-dashed border-gray-200 rounded-lg">
+                <div className="flex justify-start items-start gap-1 flex-wrap sm:gap-2 md:gap-1 lg:justify-between">
+                  {Object.keys(familyColors).length === 0 ? (
+                    <div className="w-full text-center text-gray-400 py-8 border-2 border-dashed border-gray-200 rounded-lg">
                       No colors in this family
                     </div>
                   ) : (
-                    family.colors.map((color) => (
-                      <div key={color.name} className="group relative">
-                        <div
-                          className={`${color.class} w-12 h-12 rounded-2xl shadow-sm border border-gray-200 transition-all duration-200 hover:scale-110 hover:shadow-md cursor-pointer relative`}
-                          title={color.name}
-                          onClick={() => handleColorClick(color.hex)}
-                          onContextMenu={(e) => handleRightClick(e, { ...color, familyName: family.name })}
-                        >
-                          {copiedColor === color.hex && (
-                            <div className="absolute inset-0 flex items-center justify-center">
-                              <div className="bg-white/90 rounded-full p-1">
-                                <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 2H16M8 2V6H16V2M8 6H7.2C6.54 6 6 6.54 6 7.2V20.8C6 21.46 6.54 22 7.2 22H16.8C17.46 22 18 21.46 18 20.8V7.2C18 6.54 17.46 6 16.8 6H16M12 11V17M9 14H15" />
-                                </svg>
+                    Object.entries(familyColors)
+                      .sort(([a], [b]) => parseInt(a) - parseInt(b))
+                      .map(([colorKey, hexValue]) => {
+                        const colorName = `${familyName}-${colorKey}`
+                        const colorClass = `bg-${familyName}-${colorKey}`
+                        return (
+                          <div key={colorName} className="group relative">
+                            <div
+                              className={`${colorClass} w-8 h-8 sm:w-12 sm:h-12 md:w-14 md:h-14 lg:w-16 lg:h-16 rounded-xl sm:rounded-2xl shadow-sm border border-gray-200 transition-all duration-200 hover:scale-110 hover:shadow-md relative -ml-2 first:ml-0 sm:ml-0 hover:z-10`}
+                              style={{ backgroundColor: hexValue }}
+                              title={colorName}
+                              onContextMenu={(e) => handleRightClick(e, { name: colorName, hex: hexValue, familyName, colorKey })}
+                            >
+                            </div>
+                            <div className="absolute -bottom-6 sm:-bottom-6 left-1/2 transform -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-10">
+                              <div className="bg-gray-900 text-white text-xs px-2 py-1 rounded whitespace-nowrap">
+                                {colorName}
                               </div>
                             </div>
-                          )}
-                        </div>
-                        <div className="absolute -bottom-6 left-1/2 transform -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
-                          <div className="bg-gray-900 text-white text-xs px-2 py-1 rounded whitespace-nowrap">
-                            {color.name}
                           </div>
-                        </div>
-                      </div>
-                    ))
+                        )
+                      })
                   )}
                 </div>
+                
+                {newColorInput?.familyName === familyName && (
+                  <div className="mt-4 p-4 bg-white border border-gray-300 rounded-lg shadow-sm">
+                    <div className="flex gap-3 items-end">
+                      <div className="flex-1">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Hex Code</label>
+                        <input
+                          type="text"
+                          value={newColorInput.hex}
+                          onChange={(e) => setNewColorInput({ ...newColorInput, hex: e.target.value })}
+                          onKeyDown={handleColorKeyDown}
+                          placeholder="#ffffff"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-700 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          autoFocus
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={handleConfirmNewColor}
+                          className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white text-sm rounded-md transition-colors"
+                        >
+                          Add
+                        </button>
+                        <button
+                          onClick={handleCancelNewColor}
+                          className="px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white text-sm rounded-md transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Add family button between families */}
               <div className="relative group">
-                <div className="h-4 w-full flex items-center justify-center">
+                <div className="h-4 w-full flex items-center justify-start">
                   <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200">
                     {newFamilyInput?.index === index + 1 ? (
                       <div className="bg-white border border-gray-300 rounded-lg px-3 py-2 shadow-sm">
@@ -182,13 +279,14 @@ export default function Component() {
                           onBlur={handleCancelNewFamily}
                           autoFocus
                           placeholder="Family name..."
-                          className="text-sm border-none outline-none bg-transparent w-32 text-black"
+                          className="text-sm border-none outline-none bg-transparent w-32 text-gray-700 placeholder-gray-600"
                         />
                       </div>
                     ) : (
                       <button
                         onClick={() => handleAddFamily(index + 1)}
                         className="bg-blue-500 hover:bg-blue-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm transition-colors"
+                        title="Add a colour family"
                       >
                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -237,7 +335,7 @@ export default function Component() {
             </button>
             <hr className="my-1 border-gray-200" />
             <button
-              onClick={() => handleRemove(contextMenu.color.familyName, contextMenu.color.name)}
+              onClick={() => handleRemove(contextMenu.color.familyName, contextMenu.color.colorKey)}
               className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
